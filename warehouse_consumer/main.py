@@ -2,7 +2,8 @@ import json
 import psycopg2
 import time
 import math
-from confluent_kafka import Consumer, KafkaException
+from confluent_kafka import Consumer, KafkaException, KafkaError
+
 
 # 🕒 Wait for Postgres to be ready
 def wait_for_postgres():
@@ -68,6 +69,13 @@ def main():
                 print("lolo")
                 continue
             if msg.error():
+                print("⚠️ Kafka error:", msg.error())
+
+                if msg.error().code() == KafkaError.UNKNOWN_TOPIC_OR_PART:
+                    print("⏳ Topic not found. Waiting and retrying...")
+                    time.sleep(5)
+                    continue
+
                 raise KafkaException(msg.error())
 
             data = json.loads(msg.value().decode('utf-8'))

@@ -1,4 +1,4 @@
-# 🏭 Smart Supply Chain Kafka Consumer
+#  Supply Chain warehouse Kafka Consumer
 
 This project is a microservice built in **Python** that consumes order data from **Apache Kafka**, processes it, and updates **PostgreSQL** accordingly. It is part of a larger Smart Supply Chain Management System and is fully containerized using **Docker Compose**.
 

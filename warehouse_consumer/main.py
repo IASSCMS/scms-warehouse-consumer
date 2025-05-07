@@ -3,6 +3,9 @@ import psycopg2
 import time
 import math
 from confluent_kafka import Consumer, KafkaException, KafkaError
+from confluent_kafka import Producer
+
+producer = Producer({'bootstrap.servers': 'broker:9092'})
 
 
 # 🕒 Wait for Postgres to be ready
@@ -11,9 +14,9 @@ def wait_for_postgres():
         try:
             conn = psycopg2.connect(
                 host="db",       # match Docker Compose service name
-                dbname="scms",
-                user="newone",
-                password="password123"
+                dbname="s1",
+                user="s1",
+                password="s1"
             )
             print("✅ Connected to Postgres!")
             return conn
@@ -49,14 +52,50 @@ def find_nearest_warehouse(x, y):
             nearest_id = wid
 
     return nearest_id
-
 def reduce_quantity(warehouse_id, product_id, qty):
+    # 🔍 Step 1: Check current stock
     cursor.execute("""
-        UPDATE oltp.warehouse_inventory
-        SET quantity = quantity - %s
+        SELECT quantity
+        FROM oltp.warehouse_inventory
         WHERE warehouse_id = %s AND product_id = %s
-    """, (qty, warehouse_id, product_id))
-    conn.commit()
+    """, (warehouse_id, product_id))
+    result = cursor.fetchone()
+
+    if not result:
+        return False  # product not found
+
+    current_qty = result[0]
+
+    if current_qty >= qty:
+        # ✅ Step 2: Reduce quantity
+        cursor.execute("""
+            UPDATE oltp.warehouse_inventory
+            SET quantity = quantity - %s
+            WHERE warehouse_id = %s AND product_id = %s
+        """, (qty, warehouse_id, product_id))
+        conn.commit()
+        return True  # success
+    else:
+        # ❌ Not enough stock
+        return False
+
+# def reduce_quantity(warehouse_id, product_id, qty,action):
+#     if action == "reduce":
+#         cursor.execute("""
+#             UPDATE oltp.warehouse_inventory
+#             SET quantity = quantity - %s
+#             WHERE warehouse_id = %s AND product_id = %s
+#         """, (qty, warehouse_id, product_id))
+#
+#
+#     elif action == "restore":
+#         cursor.execute("""
+#             UPDATE oltp.warehouse_inventory
+#             SET quantity = quantity + %s
+#             WHERE warehouse_id = %s
+#             AND product_id = %s
+#         """, (qty, warehouse_id, product_id))
+#     conn.commit()
 
 def main():
     print("🟢 Kafka Consumer is running...")
@@ -80,17 +119,46 @@ def main():
 
             data = json.loads(msg.value().decode('utf-8'))
             print("📥 Received:", data)
-
+            order_id = data['order_id']
             location_x = data["location_x"]
             location_y = data["location_y"]
             product_id = data["product_id"]
             quantity = data["quantity"]
+            action = data["action"]
 
             nearest_warehouse_id = find_nearest_warehouse(location_x, location_y)
             print(f"🏬 Nearest warehouse: {nearest_warehouse_id}")
+            if action == "reduce":
+                success = reduce_quantity(nearest_warehouse_id, product_id, quantity)
 
-            reduce_quantity(nearest_warehouse_id, product_id, quantity)
-            print(f"✅ Reduced {quantity} of product {product_id} at warehouse {nearest_warehouse_id}")
+                status = "approved" if success else "failed"
+
+                order_message = {
+                    "order_id": order_id,
+                    "product_id": product_id,
+                    "quantity": quantity,
+                    "location_x": location_x,
+                    "location_y": location_y,
+                    "status": status
+                    # Add "order_id" if available in incoming message
+                }
+
+                producer.produce("inventory_ack", json.dumps(order_message).encode('utf-8'))
+                producer.flush()
+
+                print(f"📤 Sent inventory confirmation to 'inventory_ack' with status: {status}")
+
+            elif action == "restore":
+                cursor.execute("""
+                    UPDATE oltp.warehouse_inventory
+                    SET quantity = quantity + %s
+                    WHERE warehouse_id = %s
+                    AND product_id = %s
+                """, (quantity, nearest_warehouse_id, product_id))
+            conn.commit()
+            #
+            # reduce_quantity(nearest_warehouse_id, product_id, quantity,action)
+            # print(f"✅ Reduced {quantity} of product {product_id} at warehouse {nearest_warehouse_id}")
 
     except KeyboardInterrupt:
         print("🛑 Consumer stopped")

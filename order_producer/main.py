@@ -20,10 +20,12 @@ def generate_random_order():
         return ''.join(random.choices(string.ascii_uppercase, k=2))
 
     return {
+        "order_id": 2,
         "location_x": 10,
         "location_y": 20,
         "product_id":101,
-        "quantity": 10
+        "quantity": 200,
+        "action": "reduce"
     }
 
 def main():
